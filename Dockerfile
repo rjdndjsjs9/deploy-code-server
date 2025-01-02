@@ -1,57 +1,64 @@
-# Start from the code-server Debian base image
-FROM codercom/code-server:4.9.0
+# Use a base image of your choice
+FROM debian:bullseye-slim
 
-USER root
-
-# Install systemd and dependencies for running systemd in the container
+# Update and install dependencies
 RUN apt-get update && apt-get install -y \
-    systemd \
-    systemd-sysv \
-    dbus \
-    sudo \
     curl \
-    unzip && \
+    unzip \
+    sudo \
+    systemd \
+    dbus \
+    lsb-release \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    software-properties-common && \
     apt-get clean
 
-# Enable systemd inside the container by setting the necessary environment variables
+# Install Docker (optional if you want Docker-in-Docker)
+RUN curl -fsSL https://get.docker.com -o get-docker.sh && \
+    sh get-docker.sh && \
+    rm get-docker.sh
+
+# Install Docker Compose (optional for Docker management)
+RUN curl -L https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(lsb_release -cs)-x86_64 -o /usr/local/bin/docker-compose && \
+    chmod +x /usr/local/bin/docker-compose
+
+# Set environment variables for UID and to force Docker container to run as root
+ENV RAILWAY_RUN_UID=0
+
+# Set up systemd init system
 ENV container=docker
 
-# Apply VS Code settings
-COPY deploy-container/settings.json .local/share/code-server/User/settings.json
-
-# Use bash shell
-ENV SHELL=/bin/bash
-
-# Install unzip + rclone (support for remote filesystem)
+# Install rclone for remote filesystem support (optional)
 RUN curl https://rclone.org/install.sh | bash
 
-# Copy rclone tasks to /tmp, to potentially be used
-COPY deploy-container/rclone-tasks.json /tmp/rclone-tasks.json
+# Set working directory
+WORKDIR /home/coder
 
-# Fix permissions for code-server
-RUN chown -R coder:coder /home/coder/.local
+# Setup volume mount points to persist data
+# The following lines assume you want to create volumes for your app data, logs, and config
+VOLUME ["/mnt/data", "/mnt/config", "/mnt/logs"]
 
-# You can add custom software and dependencies for your environment below
-# -----------
+# Make sure the user 'coder' has correct permissions for these volumes
+RUN chown -R coder:coder /mnt/data /mnt/config /mnt/logs
 
-# Install a VS Code extension:
-# RUN code-server --install-extension esbenp.prettier-vscode
+# Install any other dependencies or tools
+RUN apt-get install -y vim git build-essential
 
-# Install apt packages:
-# RUN apt-get install -y ubuntu-make
+# Set the default shell to bash
+ENV SHELL=/bin/bash
 
-# Copy files: 
-# COPY deploy-container/myTool /home/coder/myTool
+# Expose necessary ports (example port 8080)
+EXPOSE 8080
 
-# -----------
+# Add a script to act as an entry point for the container
+COPY entrypoint.sh /usr/bin/entrypoint.sh
+RUN chmod +x /usr/bin/entrypoint.sh
 
-# Set up the systemd init system to run with the container
-VOLUME [ "/sys/fs/cgroup" ]
+# Set the entrypoint to a custom script or systemd
+ENTRYPOINT ["/usr/bin/entrypoint.sh"]
 CMD ["/sbin/init"]
 
-# Port
-ENV PORT=8080
-
-# Use our custom entrypoint script first
-COPY deploy-container/entrypoint.sh /usr/bin/deploy-container-entrypoint.sh
-ENTRYPOINT ["/usr/bin/deploy-container-entrypoint.sh"]
+# Ensure that the container stays alive
+STOPSIGNAL SIGTERM
